@@ -4,9 +4,11 @@
 using Celeste.Mod;
 using Microsoft.Xna.Framework;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 using Monocle;
 using MonoMod;
 using MonoMod.Cil;
+using MonoMod.InlineRT;
 using MonoMod.Utils;
 using System;
 using System.Collections.Generic;
@@ -171,6 +173,7 @@ namespace Celeste {
                             int y = int.Parse(subtexture[1]);
 
                             try {
+                                tiles.Index = new Point(x, y);
                                 tiles.Textures.Add(tileset[x, y]);
                             } catch (IndexOutOfRangeException e) {
                                 throw new IndexOutOfRangeException($"Tileset with id '{data.ID}' missing tile at ({x}, {y}).", e);
@@ -474,6 +477,8 @@ namespace Celeste {
         [MonoModIgnore]
         private class patch_Tiles {
             public List<MTexture> Textures;
+            public Point Index;
+
             public List<string> OverlapSprites;
             public bool HasOverlays;
 
@@ -499,6 +504,12 @@ namespace MonoMod {
     [MonoModCustomMethodAttribute(nameof(MonoModRules.PatchAutotilerCtor))]
     class PatchAutotilerCtorAttribute : Attribute { }
 
+    /// <summary>
+    /// Patches Celeste.Autotiler.orig_ReadInto to store tile index information.
+    /// </summary>
+    [MonoModCustomMethodAttribute(nameof(MonoModRules.PatchAutotilerReadInto))]
+    class PatchAutotilerReadIntoAttribute : Attribute { }
+
     static partial class MonoModRules {
         public static void PatchAutotilerCtor(ILContext context, CustomAttribute attrib) {
             ILCursor cursor = new(context);
@@ -514,6 +525,64 @@ namespace MonoMod {
             cursor.EmitLdloc3(); // char c (the tileset id)
             cursor.EmitLdarg1(); // string filename (the xml path)
             cursor.EmitCallvirt(m_throwOnDuplicateId);
+        }
+
+        public static void PatchAutotilerReadInto(ILContext context, CustomAttribute attrib) {
+            TypeDefinition t_Tiles = MonoModRule.Modder.FindType("Celeste.Autotiler/Tiles").Resolve();
+            FieldDefinition f_Tiles_Index = t_Tiles.FindField("Index");
+
+            TypeDefinition t_Point = MonoModRule.Modder.FindType("Microsoft.Xna.Framework.Point").Resolve();
+            MethodReference m_Point_ctor = MonoModRule.Modder.Module.ImportReference(t_Point.FindMethod(".ctor"));
+            
+            ILCursor cursor = new(context);
+
+            /*
+             tiles = masked.Tiles;
+             
+             [...]
+             
+              <-- tiles.Index = new Point(x, y);
+             MTexture item = tileset[x, y];
+             tiles.Textures.Add(item);
+             */
+
+            int loc_tiles = 4;
+            cursor.GotoNext(
+                    instr => instr.MatchLdfld("Celeste.Autotiler/Masked", "Tiles"),
+                    instr => instr.MatchStloc(out loc_tiles)
+                );
+
+            int loc_x = 10;
+            int loc_y = 11;
+            cursor.GotoNext(MoveType.After,
+                    instr => instr.MatchLdloc(out loc_x),
+                    instr => instr.MatchLdloc(out loc_y),
+                    instr => instr.MatchCallvirt("Monocle.Tileset", "get_Item"),
+                    instr => instr.MatchStloc(out _)
+                );
+
+            EmitLdlocX(cursor, loc_tiles);
+            EmitLdlocX(cursor, loc_x);
+            EmitLdlocX(cursor, loc_y);
+            cursor.EmitNewobj(m_Point_ctor);
+            cursor.EmitStfld(f_Tiles_Index);
+
+            static ILCursor EmitLdlocX(ILCursor cur, int operand) {
+                switch (operand) {
+                    case 0:
+                        return cur.Emit(OpCodes.Ldloc_0);
+                    case 1:
+                        return cur.Emit(OpCodes.Ldloc_1);
+                    case 2:
+                        return cur.Emit(OpCodes.Ldloc_2);
+                    case 3:
+                        return cur.Emit(OpCodes.Ldloc_3);
+                    case >= 4 and <= byte.MaxValue:
+                        return cur.Emit(OpCodes.Ldloc_S, (byte) operand);
+                    default:
+                        return cur.Emit(OpCodes.Ldloc, operand);
+                }
+            }
         }
     }
 }
