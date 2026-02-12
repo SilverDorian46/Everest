@@ -43,6 +43,7 @@ namespace Celeste {
             return orig_GenerateOverlay(id, x, y, tilesX, tilesY, mapData);
         }
 
+        [PatchAutotilerReadInto]
         private extern void orig_ReadInto(patch_TerrainType data, Tileset tileset, XmlElement xml);
         private void ReadInto(patch_TerrainType data, Tileset tileset, XmlElement xml) {
             if (xml.HasAttr("scanWidth")) {
@@ -474,9 +475,9 @@ namespace Celeste {
         }
 
         // Required because Tiles is private.
-        [MonoModIgnore]
         private class patch_Tiles {
             public List<MTexture> Textures;
+            // To-do: change this to List<Point>
             public Point Index;
 
             public List<string> OverlapSprites;
