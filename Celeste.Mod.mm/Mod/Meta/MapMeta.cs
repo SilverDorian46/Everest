@@ -303,7 +303,10 @@ namespace Celeste.Mod.Meta {
         public static PlayerInventory? GetInventory(string meta) {
             if (string.IsNullOrEmpty(meta))
                 return null;
-            // TODO: Allow mod player inventories in the future.
+
+            if (Everest.Events.MapMeta.GetInventory(meta) is { } inventory)
+                return inventory;
+
             switch (meta) {
                 case "Default":
                     return PlayerInventory.Default;
@@ -590,6 +593,23 @@ namespace Celeste.Mod {
 
                     return null;
                 }
+
+                public delegate PlayerInventory? GetInventoryHandler(string meta);
+
+                /// <summary>
+                /// Called during <see cref="Meta.MapMeta.GetInventory"/>.
+                /// </summary>
+                public static event GetInventoryHandler OnGetInventory;
+
+                internal static PlayerInventory? GetInventory(string meta) {
+                    if (OnGetInventory is not null)
+                        foreach (GetInventoryHandler handler in OnGetInventory.GetInvocationList())
+                            if (handler(meta) is { } inventory)
+                                return inventory;
+
+                    return null;
+                }
+
             }
         }
     }
